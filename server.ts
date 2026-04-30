@@ -13,12 +13,38 @@ async function startServer() {
 
   app.use(express.json());
 
+  const isLocalOrPrivateIp = (ip: string) => {
+    return /^(::1|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.|0\.0\.0\.0)/.test(ip);
+  };
+
   // API Route: Get visitor's IP
-  app.get('/api/my-ip', (req, res) => {
-    // In production/Cloud Run, the real IP is often in x-forwarded-for
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0] : req.socket.remoteAddress;
-    res.json({ ip });
+  app.get('/api/my-ip', async (req, res) => {
+    try {
+      // In production/Cloud Run, the real IP is often in x-forwarded-for
+      const forwarded = req.headers['x-forwarded-for'];
+      const forwardedIp = typeof forwarded === 'string'
+        ? forwarded.split(',')[0]?.trim()
+        : Array.isArray(forwarded)
+          ? forwarded[0]
+          : undefined;
+      const rawIp = forwardedIp || req.socket.remoteAddress || '';
+      const normalizedIp = rawIp.replace(/^::ffff:/, '');
+
+      if (normalizedIp && !isLocalOrPrivateIp(normalizedIp)) {
+        return res.json({ ip: normalizedIp });
+      }
+
+      // Local development requests arrive from loopback/private addresses.
+      // In that case, fetch the machine's public IP so the local user still sees their real address.
+      const publicIpResponse = await axios.get('https://api.ipify.org?format=json', {
+        timeout: 5000,
+      });
+
+      return res.json({ ip: publicIpResponse.data.ip || normalizedIp });
+    } catch (error) {
+      console.error('My IP detection error:', error);
+      return res.status(500).json({ error: 'Failed to detect your IP address' });
+    }
   });
 
   // API Route: Lookup IP info

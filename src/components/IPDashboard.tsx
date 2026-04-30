@@ -13,7 +13,8 @@ import {
   ArrowRight,
   ExternalLink,
   ChevronRight,
-  Activity
+  Activity,
+  Radar
 } from 'lucide-react';
 import Map from './Map';
 import { clsx, type ClassValue } from 'clsx';
@@ -54,11 +55,33 @@ export default function IPDashboard() {
   const [query, setQuery] = useState('');
   const [data, setData] = useState<IPDetails | null>(null);
   const [loading, setLoading] = useState(false);
+  const [detectingIp, setDetectingIp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [visitorIp, setVisitorIp] = useState<string | null>(null);
 
   const isLocalIp = (ip: string) => {
     return /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1|0\.0\.0\.0|::ffff:0\.0\.0\.0)$/.test(ip);
+  };
+
+  const fetchVisitorIp = async () => {
+    setDetectingIp(true);
+    try {
+      const myIpRes = await axios.get('/api/my-ip');
+      const detectedIp = myIpRes.data.ip;
+
+      if (!detectedIp) {
+        throw new Error('Unable to detect your IP address');
+      }
+
+      setVisitorIp(detectedIp);
+      return detectedIp as string;
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Unable to detect your IP address');
+      return null;
+    } finally {
+      setDetectingIp(false);
+    }
   };
 
   const fetchIPDetails = async (target: string = '', showError = true) => {
@@ -70,8 +93,8 @@ export default function IPDashboard() {
       // If target is empty, we lookup the user's current IP first to get the IP string, then lookup details
       let lookupQuery = target;
       if (!target) {
-        const myIpRes = await axios.get('/api/my-ip');
-        lookupQuery = myIpRes.data.ip;
+        const detectedIp = await fetchVisitorIp();
+        lookupQuery = detectedIp || '';
 
         // Local development can return a loopback/reserved address, which should not show an error toast on initial load.
         if (!lookupQuery || isLocalIp(lookupQuery)) {
@@ -104,6 +127,17 @@ export default function IPDashboard() {
     if (query.trim()) {
       fetchIPDetails(query.trim());
     }
+  };
+
+  const handleDetectOwnIp = async () => {
+    setError(null);
+    const detectedIp = visitorIp || await fetchVisitorIp();
+    if (!detectedIp) {
+      return;
+    }
+
+    setQuery(detectedIp);
+    fetchIPDetails(detectedIp);
   };
 
   const DetailCard = ({ label, value, icon: Icon, subValue }: { label: string, value: string | boolean, icon: any, subValue?: string }) => (
@@ -162,6 +196,23 @@ export default function IPDashboard() {
               {loading ? 'Analyzing' : 'Analyze'}
             </button>
           </form>
+          <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <button
+              type="button"
+              onClick={handleDetectOwnIp}
+              disabled={loading || detectingIp}
+              className="inline-flex items-center justify-center gap-2 self-start rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-blue-300 transition-all hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Radar size={14} className={cn((loading || detectingIp) && "animate-spin")} />
+              {detectingIp ? 'Detecting...' : 'Use My IP'}
+            </button>
+            <p className="text-xs text-slate-400">
+              Your IP:{' '}
+              <span className="font-mono text-blue-300">
+                {visitorIp || 'Tap "Use My IP" to detect it'}
+              </span>
+            </p>
+          </div>
           {data && (
             <p className="text-center text-slate-500 text-[10px] mt-4 tracking-[0.2em] uppercase">
               Current Observation: <span className="text-blue-400 font-mono">{data.query}</span>
